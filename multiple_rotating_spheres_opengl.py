@@ -1,0 +1,150 @@
+import glfw
+import OpenGL.GL as gl
+import numpy as np
+from OpenGL.GL.shaders import compileProgram, compileShader
+import glm
+
+# Vertex Shader
+VERTEX_SHADER = """
+#version 330
+layout(location = 0) in vec3 position;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 modelMatrix;
+void main() {
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+}
+"""
+
+# Fragment Shader
+FRAGMENT_SHADER = """
+#version 330
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(1.0, 1.0, 1.0, 1.0);
+}
+"""
+
+# Initialize GLFW
+if not glfw.init():
+    raise Exception("GLFW can't be initialized")
+
+# Create window
+window = glfw.create_window(800, 600, "3D Simulation with Camera", None, None)
+
+if not window:
+    glfw.terminate()
+    raise Exception("GLFW window can't be created")
+
+glfw.make_context_current(window)
+gl.glClearColor(0, 0.1, 0.1, 1)
+gl.glEnable(gl.GL_DEPTH_TEST)  # Enable depth testing
+
+# Compile shaders and program
+shader = compileProgram(compileShader(VERTEX_SHADER, gl.GL_VERTEX_SHADER),
+                        compileShader(FRAGMENT_SHADER, gl.GL_FRAGMENT_SHADER))
+
+def create_sphere(radius, latitude_segments, longitude_segments):
+    vertices = []
+    for lat_step in range(latitude_segments + 1):
+        phi = np.pi * lat_step / latitude_segments
+        for long_step in range(longitude_segments + 1):
+            theta = 2 * np.pi * long_step / longitude_segments
+
+            x = radius * np.sin(phi) * np.cos(theta)
+            y = radius * np.sin(phi) * np.sin(theta)
+            z = radius * np.cos(phi)
+
+            vertices.extend([x, y, z])
+
+    return np.array(vertices, dtype=np.float32)
+
+
+
+# Usage
+sphere_vertices = create_sphere(radius=1.0, latitude_segments=20, longitude_segments=20)
+sphere_vertices_np = np.array(sphere_vertices, dtype=np.float32)  # Convert to NumPy array
+
+num_vertices = len(sphere_vertices_np) // 3  # Assuming each vertex has 3 components (x, y, z)
+gl.glDrawArrays(gl.GL_TRIANGLES, 0, num_vertices)
+
+
+# Generate buffers
+VBO = gl.glGenBuffers(1)
+VAO = gl.glGenVertexArrays(1)
+gl.glBindVertexArray(VAO)
+gl.glBindBuffer(gl.GL_ARRAY_BUFFER, VBO)
+gl.glBufferData(gl.GL_ARRAY_BUFFER, sphere_vertices_np.nbytes, sphere_vertices_np, gl.GL_STATIC_DRAW)
+
+
+# Position attribute
+gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 0, None)
+gl.glEnableVertexAttribArray(0)
+
+gl.glUseProgram(shader)
+
+# Camera setup
+camera_pos = glm.vec3(0, 0, 5)
+camera_front = glm.vec3(0, 0, -1)
+camera_up = glm.vec3(0, 1, 0)
+
+# Define the number of spheres and their positions
+
+sphere_positions = [
+    glm.vec3(1, 0, 0),
+    glm.vec3(-1, 0, 0),
+]
+num_spheres = len(sphere_positions)
+
+# Rotation angle variables
+x_rotate = 0
+y_rotate = 0
+z_rotate = 0
+
+# Main loop
+while not glfw.window_should_close(window):
+    glfw.poll_events()
+
+    # Handle key inputs for rotation
+    if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
+        x_rotate += 1
+    if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
+        x_rotate -= 1
+    if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
+        y_rotate += 1
+    if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
+        y_rotate -= 1
+    if glfw.get_key(window, glfw.KEY_PAGE_UP) == glfw.PRESS:
+        z_rotate += 1
+    if glfw.get_key(window, glfw.KEY_PAGE_DOWN) == glfw.PRESS:
+        z_rotate -= 1
+
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+    # Camera/view setup
+    view = glm.lookAt(camera_pos, camera_pos + camera_front, camera_up)
+    projection = glm.perspective(glm.radians(45), 800/600, 0.1, 100.0)
+
+    for position in sphere_positions:
+        # For each sphere, calculate its model matrix based on its position
+        model = glm.translate(glm.mat4(1.0), position)
+        model = glm.rotate(model, glm.radians(x_rotate), glm.vec3(1, 0, 0))
+        model = glm.rotate(model, glm.radians(y_rotate), glm.vec3(0, 1, 0))
+        model = glm.rotate(model, glm.radians(z_rotate), glm.vec3(0, 0, 1))
+
+        # Pass the view, projection, and model matrices to the shader
+        view_loc = gl.glGetUniformLocation(shader, "viewMatrix")
+        proj_loc = gl.glGetUniformLocation(shader, "projectionMatrix")
+        model_loc = gl.glGetUniformLocation(shader, "modelMatrix")
+        
+        gl.glUniformMatrix4fv(view_loc, 1, gl.GL_FALSE, glm.value_ptr(view))
+        gl.glUniformMatrix4fv(proj_loc, 1, gl.GL_FALSE, glm.value_ptr(projection))
+        gl.glUniformMatrix4fv(model_loc, 1, gl.GL_FALSE, glm.value_ptr(model))
+
+        gl.glBindVertexArray(VAO)
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, num_vertices)
+
+    glfw.swap_buffers(window)
+
+# Cleanup
+glfw.terminate()
